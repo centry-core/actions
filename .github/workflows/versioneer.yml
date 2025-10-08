@@ -1,0 +1,57 @@
+name: Increment Version
+
+on:
+  workflow_call: # This makes the workflow reusable
+    inputs:
+      metadata_file:
+        description: "The path to the metadata file (e.g., metadata.json)"
+        required: true
+        type: string
+      version_key:
+        description: "The key in the metadata file that contains the version (e.g., .version)"
+        required: true
+        type: string
+        default: '.version'
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Bump version in metadata file
+        id: bump_version
+        run: |
+          # Get the current version from the metadata file
+          current_version=$(jq -r '${{ inputs.version_key }}' ${{ inputs.metadata_file }})
+
+          # Calculate new version by incrementing the rightmost value by 1
+          new_version=$(python -c "version_parts = '$current_version'.rsplit('.', 1); version_parts[-1] = str(int(version_parts[-1]) + 1); print('.'.join(version_parts))")
+
+          # Update the metadata file with the new version
+          jq --arg ver $new_version '${{ inputs.version_key }} = $ver' ${{ inputs.metadata_file }} > temp.json
+          mv temp.json ${{ inputs.metadata_file }}
+
+          # Configure Git user info for this commit
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Commit and push changes
+          git add ${{ inputs.metadata_file }}
+          git commit -m "Increment version to $new_version" || echo "No changes to commit"
+          git push
+
+          echo "old_version=$current_version" >> $GITHUB_OUTPUT
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          
+      - name: Show version bump annotation
+        # This step uses the output from the "bump_version" step
+        run: |
+          echo "::notice title=Version Bump::Incrementing version from ${{ steps.bump_version.outputs.old_version }} to ${{ steps.bump_version.outputs.new_version }}"
